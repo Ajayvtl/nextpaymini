@@ -26,6 +26,8 @@ const PaymentForm = () => {
     const [showPayNow, setShowPayNow] = useState(false);
     const [showProgressBar, setShowProgressBar] = useState(false);
     const [timeLeft, setTimeLeft] = useState(60);
+    const [settest, setTest] = useState(0);
+    // const [mobile, setMobile] = useState(0);
     const postUrl = 'http://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Replace with correct endpoint
     const nextUrl = 'http://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Redirect URL
     // Get URL Parameters
@@ -34,6 +36,8 @@ const PaymentForm = () => {
         const userid = urlParams.get('userid');
         const urlAmount = urlParams.get('amount');
         const urlTransid = urlParams.get('transid');
+        // const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        // setMobile(isMobileDevice ? 1 : 0);
         if (!urlAmount || !urlTransid) {
             alert('❌ Error: Missing required parameters in URL. Please check and try again.');
             window.location.href = nextUrl;
@@ -68,16 +72,18 @@ const PaymentForm = () => {
             datetime: new Date().toISOString(),
             status: 'timeout',
             walletid: sender,
+            receiver: receiver,
             hash: '',
         };
-
-        alert('⏰ Time expired! Redirecting...');
         sendTransactionData(responseData); // ✅ Send timeout response and redirect
     };
 
     // Connect Wallet
     // ✅ Connect Wallet Using MetaMask SDK
     const connectWallet = async () => {
+        const test = 0;
+        setTest(test);
+
         try {
             console.log('📡 Trying to connect wallet...');
             // Get MetaMask provider using SDK
@@ -119,14 +125,23 @@ const PaymentForm = () => {
             //     return;
             // }
             const networkId = await web3Instance.eth.net.getId();
-            if (networkId !== 56) {
-                alert('Please switch to Binance Smart Chain (BSC).');
-                console.log('🌐 Network ID:', networkId);
-                console.log('❌ Incorrect network:', networkId);
-                setErrorMessage('❌ Wrong Network! Switch to Binance Smart Chain.');
-                return;
+            if (test == 1) {
+                if (networkId !== 97) {
+                    alert('Please switch to Binance Smart Chain (BSC).');
+                    console.log('🌐 Network ID:', networkId);
+                    console.log('❌ Incorrect network:', networkId);
+                    setErrorMessage('❌ Wrong Network! Switch to test Binance Smart Chain.');
+                    return;
+                }
+            } else {
+                if (networkId !== 56) {
+                    alert('Please switch to Binance Smart Chain (BSC).');
+                    console.log('🌐 Network ID:', networkId);
+                    console.log('❌ Incorrect network:', networkId);
+                    setErrorMessage('❌ Wrong Network! Switch to Binance Smart Chain.');
+                    return;
+                }
             }
-
             setSender(accs[0]);
             setWalletStatus('✅ Wallet Connected to Binance Smart Chain');
             setShowProgressBar(true); // Show progress bar
@@ -151,6 +166,44 @@ const PaymentForm = () => {
             alert('⚠️ Failed to switch network! Please switch manually in your wallet.');
         }
     };
+    const switchTotBSC = async () => {
+        try {
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: '0x61' }], // ✅ 0x61 is 97 in hexadecimal (BSC Testnet)
+            });
+            setWalletStatus('✅ Switched to Binance Smart Chain Testnet');
+        } catch (switchError) {
+            // If the chain is not added, add it manually
+            if (switchError.code === 4902) {
+                try {
+                    await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [
+                            {
+                                chainId: '0x61', // ✅ BNB Testnet chain ID in hex (97)
+                                chainName: 'Binance Smart Chain Testnet',
+                                nativeCurrency: {
+                                    name: 'BNB',
+                                    symbol: 'BNB',
+                                    decimals: 18,
+                                },
+                                rpcUrls: ['https://data-seed-prebsc-1-s1.binance.org:8545/'], // ✅ Public RPC URL
+                                blockExplorerUrls: ['https://testnet.bscscan.com/'],
+                            },
+                        ],
+                    });
+                    setWalletStatus('✅ Switched to Binance Smart Chain Testnet');
+                } catch (addError) {
+                    console.error('❌ Failed to add BSC Testnet:', addError);
+                    alert('⚠️ Failed to add BSC Testnet! Please add it manually.');
+                }
+            } else {
+                console.error('❌ Error switching network:', switchError);
+                alert('⚠️ Failed to switch network! Please switch manually in your wallet.');
+            }
+        }
+    };
 
     // ✅ Make Payment
     const makePayment = async () => {
@@ -160,60 +213,126 @@ const PaymentForm = () => {
         }
         // ✅ Double-check network ID before payment
         const networkId = await web3.eth.net.getId();
-        if (networkId !== 56) {
-            alert('❌ Wrong Network Detected! Please switch to Binance Smart Chain (BSC).');
-            setErrorMessage('❌ Wrong Network! Switch to Binance Smart Chain.');
-            await switchToBSC();
-            return;
-        }
-        const contract = new web3.eth.Contract(contractABI, contractAddress);
-        const amountInWei = web3.utils.toWei(amount, 'ether');
-
-        try {
-            setShowProgressBar(true);
-            const gas = await contract.methods.transfer(receiver, amountInWei).estimateGas({ from: sender });
-            const result = await contract.methods.transfer(receiver, amountInWei).send({ from: sender, gas });
-            const readableAmount = web3.utils.fromWei(amount, 'ether');
-            // ✅ Success Response
-            const responseData = {
-                userid: userid, // Replace with actual user ID
-                amount: readableAmount,
-                transid: transid,
-                datetime: new Date().toISOString(),
-                status: 'success',
-                walletid: sender,
-                receiver: receiver,
-                hash: result.transactionHash,
-            };
-            setErrorMessage('Completed' + result.transactionHash);
-            alert('Transaction Successful! Hash: ' + result.transactionHash);
-            sendTransactionData(responseData); // ✅ Send transaction data and redirect
-        } catch (error) {
-            setErrorMessage(`❌ Transaction failed: ${error.message}`);
-            const responseData = {
-                userid: userid,
-                amount: web3.utils.fromWei(amountInWei, 'ether'),
-                transid: transid,
-                datetime: new Date().toISOString(),
-                status: 'failed',
-                walletid: sender,
-                hash: '',
-            };
-            if (error.message.includes("transfer amount exceeds balance")) {
-                setErrorMessage("Error: Insufficient USDT balance.");
-                document.getElementById('progressBar').style.display = 'none';
-            } else if (error.message.includes("gas required exceeds allowance")) {
-                setErrorMessage("Error: Insufficient BNB for gas fees.");
-                document.getElementById('progressBar').style.display = 'none';
-            } else {
-                setErrorMessage("Transaction failed: " + error.message);
-                document.getElementById('progressBar').style.display = 'none';
+        if (settest == 1) {
+            if (networkId !== 97) {
+                alert('❌ Wrong Network Detected! Please switch to Binance Smart Chain (BSC).');
+                setErrorMessage('❌ Wrong Network! Switch to Binance Smart Chain.');
+                await switchTotBSC();
+                return;
             }
-            alert('Transaction failed: ' + error.message);
-            sendTransactionData(responseData); // ✅ Send failure data and redirect
-        } finally {
-            setShowProgressBar(false);
-            setShowPayNow(false); // Hide PayNow after transaction
+
+        } else {
+            if (networkId !== 56) {
+                alert('❌ Wrong Network Detected! Please switch to Binance Smart Chain (BSC).');
+                setErrorMessage('❌ Wrong Network! Switch to Binance Smart Chain.');
+                await switchToBSC();
+                return;
+            }
+        }
+        const amountInWei = web3.utils.toWei(amount, 'ether');
+        if (settest == 1) {
+            setShowProgressBar(true);
+            try {
+                // Check if Web3 instance is available
+                if (!web3) {
+                    alert('⚠️ Web3 not initialized. Please connect to MetaMask.');
+                    return;
+                }
+
+                const accounts = await web3.eth.getAccounts(); // Get connected accounts
+                if (!accounts || accounts.length === 0) {
+                    alert('❌ No account connected. Please connect MetaMask.');
+                    return;
+                }
+
+                const senderAddress = accounts[0]; // First connected account
+                const receiverAddress = '0x027A620bBc880BfdAc9aE2C11617EC43CDcb7792'; // Replace with receiver's address
+                const amountToSend = amount; // Amount in BNB (e.g., 0.01 BNB)
+                // const readableAmount = web3.utils.fromWei(amount, 'ether');
+                console.log('🔗 Preparing transaction...');
+                const tx = await web3.eth.sendTransaction({
+                    from: senderAddress,
+                    to: receiverAddress,
+                    value: web3.utils.toWei(amountToSend, 'ether'), // Convert BNB to Wei
+                    gas: 21000, // Gas limit for sending BNB
+                });
+                const responseData = {
+                    userid: userid, // Replace with actual user ID
+                    amount: web3.utils.toWei(amountToSend, 'ether'),
+                    transid: transid,
+                    datetime: new Date().toISOString(),
+                    status: 'success',
+                    walletid: sender,
+                    receiver: receiverAddress,
+                    hash: tx.transactionHash,
+                };
+                sendTransactionData(responseData);
+                console.log(`✅ Transaction successful! Hash: ${tx.transactionHash}`);
+                alert(`✅ Transaction successful! Hash: ${tx.transactionHash}`);
+            } catch (error) {
+                const receiverAddress = '0x027A620bBc880BfdAc9aE2C11617EC43CDcb7792'; // Replace with receiver's address
+                const responseData = {
+                    userid: userid, // Replace with actual user ID
+                    amount: amount,
+                    transid: transid,
+                    datetime: new Date().toISOString(),
+                    status: 'success',
+                    walletid: sender,
+                    receiver: receiverAddress,
+                    hash: '',
+                };
+                sendTransactionData(responseData);
+                console.error('❌ Transaction failed:', error.message);
+                alert(`❌ Transaction failed: ${error.message}`);
+            }
+        } else {
+            setShowProgressBar(true);
+            try {
+                const contract = new web3.eth.Contract(contractABI, contractAddress);
+                const gas = await contract.methods.transfer(receiver, amountInWei).estimateGas({ from: sender });
+                const result = await contract.methods.transfer(receiver, amountInWei).send({ from: sender, gas });
+                const amountToSend = amount; // Amount in BNB (e.g., 0.01 BNB)
+                // ✅ Success Response
+                const responseData = {
+                    userid: userid, // Replace with actual user ID
+                    amount: web3.utils.toWei(amountToSend, 'ether'),
+                    transid: transid,
+                    datetime: new Date().toISOString(),
+                    status: 'success',
+                    walletid: sender,
+                    receiver: receiver,
+                    hash: result.transactionHash,
+                };
+                setErrorMessage('Completed' + result.transactionHash);
+                alert('Transaction Successful! Hash: ' + result.transactionHash);
+                sendTransactionData(responseData); // ✅ Send transaction data and redirect
+            } catch (error) {
+                setErrorMessage(`❌ Transaction failed: ${error.message}`);
+                const responseData = {
+                    userid: userid,
+                    amount: web3.utils.fromWei(amountInWei, 'ether'),
+                    transid: transid,
+                    datetime: new Date().toISOString(),
+                    status: 'failed',
+                    walletid: sender,
+                    hash: '',
+                };
+                if (error.message.includes("transfer amount exceeds balance")) {
+                    setErrorMessage("Error: Insufficient USDT balance.");
+                    document.getElementById('progressBar').style.display = 'none';
+                } else if (error.message.includes("gas required exceeds allowance")) {
+                    setErrorMessage("Error: Insufficient BNB for gas fees.");
+                    document.getElementById('progressBar').style.display = 'none';
+                } else {
+                    setErrorMessage("Transaction failed: " + error.message);
+                    document.getElementById('progressBar').style.display = 'none';
+                }
+                alert('Transaction failed: ' + error.message);
+                sendTransactionData(responseData); // ✅ Send failure data and redirect
+            } finally {
+                setShowProgressBar(false);
+                setShowPayNow(false); // Hide PayNow after transaction
+            }
         }
     };
     // ✅ Send Transaction Data to API
