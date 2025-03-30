@@ -26,8 +26,8 @@ const PaymentForm = () => {
     const [showPayNow, setShowPayNow] = useState(false);
     const [showProgressBar, setShowProgressBar] = useState(false);
     const [timeLeft, setTimeLeft] = useState(60);
-    const postUrl = 'http://localhost/MBAPI/mbsucess.php'; // Replace with correct endpoint
-    const nextUrl = 'http://localhost/MBAPI/mbsucess.php'; // Redirect URL
+    const postUrl = 'http://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Replace with correct endpoint
+    const nextUrl = 'http://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Redirect URL
     // Get URL Parameters
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -79,22 +79,50 @@ const PaymentForm = () => {
     // ✅ Connect Wallet Using MetaMask SDK
     const connectWallet = async () => {
         try {
+            console.log('📡 Trying to connect wallet...');
             // Get MetaMask provider using SDK
             const ethereum = MMSDK.getProvider();
             if (!ethereum) {
+                console.error('❌ MetaMask not detected!');
                 setErrorMessage('MetaMask not detected! Please install the MetaMask/Trustwallet extension.');
                 return;
             }
+            console.log('✅ MetaMask detected:', ethereum);
             const web3Instance = new Web3(ethereum);
             setWeb3(web3Instance);
-
+            console.log('✅ Web3 instance created:', web3Instance);
             // Request account access
+            console.log('✅ Web3 instance created:', web3Instance);
+            console.log('🔑 Requesting account access...');
             const accs = await ethereum.request({ method: 'eth_requestAccounts' });
+            console.error('retrieved from MetaMask.', accs);
+            if (!accs || accs.length === 0) {
+                console.error('❌ No accounts retrieved from MetaMask.');
+                setErrorMessage('❌ No accounts found. Please unlock MetaMask.');
+                return;
+            } else {
+                // ✅ Account found - Set accounts and sender properly
+                console.log('🎉 Accounts retrieved:', accs);
+                setAccounts(accs);
+                setSender(accs[0]); // Set first account
+                setErrorMessage(''); // Clear any previous errors
+                setShowPayNow(true); // Show Pay Now button if connected successfully
+            }
+            setAccounts(accs);
+            setSender(accs[0]);
+            console.log('🎉 Sender address:', accs[0]);
+            console.log('🔗 Accounts:', accs);
             setAccounts(accs);
 
+            // if (accs.length === 0) {
+            //     setErrorMessage('❌ No accounts found.');
+            //     return;
+            // }
             const networkId = await web3Instance.eth.net.getId();
             if (networkId !== 56) {
                 alert('Please switch to Binance Smart Chain (BSC).');
+                console.log('🌐 Network ID:', networkId);
+                console.log('❌ Incorrect network:', networkId);
                 setErrorMessage('❌ Wrong Network! Switch to Binance Smart Chain.');
                 return;
             }
