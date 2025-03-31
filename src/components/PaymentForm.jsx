@@ -25,7 +25,7 @@ const PaymentForm = () => {
     const [walletStatus, setWalletStatus] = useState('');
     const [showPayNow, setShowPayNow] = useState(false);
     const [showProgressBar, setShowProgressBar] = useState(false);
-    const [timeLeft, setTimeLeft] = useState(60);
+    const [timeLeft, setTimeLeft] = useState(180);
     const [settest, setTest] = useState(0);
 
 
@@ -50,7 +50,7 @@ const PaymentForm = () => {
         setTransid(urlTransid || 'N/A');
         setTime(new Date().toLocaleString()); // Local time format
         // ✅ Start Timer when page loads and showPayNow is true
-        let countdown = 120; // Timer starts with 60 seconds
+        let countdown = 180; // Timer starts with 60 seconds
         setTimeLeft(countdown);
 
         const timer = setInterval(() => {
@@ -362,13 +362,6 @@ const PaymentForm = () => {
 
                 // ✅ 2. Get Gas Price (Optional but Recommended)
                 let gasPrice;
-                try {
-                    gasPrice = await web3.eth.getGasPrice();
-                    console.log('🔗 Gas Price:', gasPrice);
-                } catch (gasPriceError) {
-                    console.warn('⚠️  Error getting gas price, using default:', gasPriceError);
-                    gasPrice = web3.utils.toWei('5', 'gwei'); // Default to 5 gwei (adjust if needed)
-                }
                 try {
                     gasPrice = await fetchGasPriceWithRetry(3, 5000);
                     console.log('✅ Gas Price after retries:', gasPrice);
