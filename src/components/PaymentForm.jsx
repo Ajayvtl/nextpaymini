@@ -27,11 +27,11 @@ const PaymentForm = () => {
     const [showProgressBar, setShowProgressBar] = useState(false);
     const [timeLeft, setTimeLeft] = useState(180);
     const [settest, setTest] = useState(0);
-
-
+    const [isPaymentProcessing, setIsPaymentProcessing] = useState(false);
+    const [retryCountdown, setRetryCountdown] = useState(0);
     // const [mobile, setMobile] = useState(0);
-    const postUrl = 'http://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Replace with correct endpoint
-    const nextUrl = 'http://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Redirect URL
+    const postUrl = 'https://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Replace with correct endpoint
+    const nextUrl = 'https://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Redirect URL
     // Get URL Parameters
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -96,7 +96,7 @@ const PaymentForm = () => {
                 return;
             }
             console.log('✅ MetaMask detected:', ethereum);
-            const web3Instance = new Web3(ethereum);
+            const web3Instance = new Web3(ethereum, null, { transactionBlockTimeout: 0 });
             setWeb3(web3Instance);
             console.log('✅ Web3 instance created:', web3Instance);
             // Request account access
@@ -204,8 +204,7 @@ const PaymentForm = () => {
     };
     // ✅ Function to Retry Make Payment with Delay
     // ✅ Function to Fetch Gas Limit with Retry
-    const fetchGasLimitWithRetry = async (contract, sender, receiver, amountInWei, retries = 3, delay = 9000) => {
-        setShowPayNow(false);
+    const fetchGasLimitWithRetry = async (contract, sender, receiver, amountInWei, retries = 3, delay = 5000) => {
         for (let i = 0; i < retries; i++) {
             try {
                 console.log(`🔁 Attempt ${i + 1} to estimate gas limit...`);
@@ -227,7 +226,7 @@ const PaymentForm = () => {
         }
     };
     // ✅ Function to Fetch Gas Price with Retry and Timeout
-    const fetchGasPriceWithRetry = async (retries = 3, delay = 9000) => {
+    const fetchGasPriceWithRetry = async (retries = 3, delay = 5000) => {
         for (let i = 0; i < retries; i++) {
             try {
                 console.log(`🔁 Attempt ${i + 1} to get gas price...`);
@@ -259,10 +258,29 @@ const PaymentForm = () => {
 
     // ✅ Make Payment
     const makePayment = async () => {
+        setIsWalletConnected(true);
+        let paymentTimeout = null;
+        let countdown = 40;
+        setRetryCountdown(countdown);
         if (!web3 || !accounts || !amount || !transid) {
             setErrorMessage('❌ Missing transaction details.');
             return;
         }
+        setIsPaymentProcessing(true);
+
+        // ✅ Start a timeout to re-enable the button if no response after 20 seconds
+        paymentTimeout = setInterval(() => {
+            countdown -= 1;
+            setRetryCountdown(countdown);
+
+            if (countdown <= 0) {
+
+                console.warn('⏳ Transaction taking longer than 20 seconds. Re-enabling Pay Now button.');
+                clearInterval(paymentTimeout);
+                setIsPaymentProcessing(false); // Re-enable the button
+                setRetryCountdown(0); // Reset countdown to 0
+            }
+        }, 1000);  // 20 seconds timeout
         // ✅ Double-check network ID before payment
         const networkId = await web3.eth.net.getId();
         if (settest == 1) {
@@ -320,6 +338,11 @@ const PaymentForm = () => {
                 sendTransactionData(responseData);
                 console.log(`✅ Transaction successful! Hash: ${tx.transactionHash}`);
                 alert(`✅ Transaction successful! Hash: ${tx.transactionHash}`);
+
+                // ✅ Clear timeout if transaction succeeds
+                if (paymentTimeout) {
+                    clearTimeout(paymentTimeout);
+                }
             } catch (error) {
                 const receiverAddress = '0x027A620bBc880BfdAc9aE2C11617EC43CDcb7792'; // Replace with receiver's address
                 const responseData = {
@@ -364,6 +387,13 @@ const PaymentForm = () => {
                 // ✅ 2. Get Gas Price (Optional but Recommended)
                 let gasPrice;
                 try {
+                    gasPrice = await web3.eth.getGasPrice();
+                    console.log('🔗 Gas Price:', gasPrice);
+                } catch (gasPriceError) {
+                    console.warn('⚠️  Error getting gas price, using default:', gasPriceError);
+                    gasPrice = web3.utils.toWei('5', 'gwei'); // Default to 5 gwei (adjust if needed)
+                }
+                try {
                     gasPrice = await fetchGasPriceWithRetry(3, 5000);
                     console.log('✅ Gas Price after retries:', gasPrice);
                 } catch (gasPriceError) {
@@ -388,6 +418,11 @@ const PaymentForm = () => {
                 setErrorMessage('Completed' + result.transactionHash);
                 alert('Transaction Successful! Hash: ' + result.transactionHash);
                 sendTransactionData(responseData); // ✅ Send transaction data and redirect
+
+                // ✅ Clear timeout if transaction succeeds
+                if (paymentTimeout) {
+                    clearTimeout(paymentTimeout);
+                }
             } catch (error) {
                 const usdtToWei = (amount, decimals = 18) => {
                     return web3.utils.toBN((parseFloat(amount) * Math.pow(10, decimals)).toFixed(0));
@@ -579,8 +614,23 @@ const PaymentForm = () => {
                                     id="payNowBtn"
                                     className="btn btn-buy mt-3"
                                     onClick={makePayment}
+                                    disabled={isPaymentProcessing} // ✅ Disable button while processing
                                 >
-                                    <i className="fa-solid fa-cart-shopping"></i> Pay Now
+                                    {isPaymentProcessing ? (
+                                        retryCountdown > 0 ? (
+                                            <>
+                                                <i className="fa-solid fa-spinner fa-spin"></i> Retry after {retryCountdown} seconds...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <i className="fa-solid fa-spinner fa-spin"></i> Processing...
+                                            </>
+                                        )
+                                    ) : (
+                                        <>
+                                            <i className="fa-solid fa-cart-shopping"></i> Pay Now
+                                        </>
+                                    )}
                                 </button>
                                 {showProgressBar && (
                                     <div id="progressBar" className="progress-bar-container">
