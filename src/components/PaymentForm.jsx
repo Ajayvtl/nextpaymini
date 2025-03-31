@@ -205,6 +205,7 @@ const PaymentForm = () => {
     // ✅ Function to Retry Make Payment with Delay
     // ✅ Function to Fetch Gas Limit with Retry
     const fetchGasLimitWithRetry = async (contract, sender, receiver, amountInWei, retries = 3, delay = 9000) => {
+        setShowPayNow(false);
         for (let i = 0; i < retries; i++) {
             try {
                 console.log(`🔁 Attempt ${i + 1} to estimate gas limit...`);
