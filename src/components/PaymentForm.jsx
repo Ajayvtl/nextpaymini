@@ -27,6 +27,8 @@ const PaymentForm = () => {
     const [showProgressBar, setShowProgressBar] = useState(false);
     const [timeLeft, setTimeLeft] = useState(60);
     const [settest, setTest] = useState(0);
+
+
     // const [mobile, setMobile] = useState(0);
     const postUrl = 'http://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Replace with correct endpoint
     const nextUrl = 'http://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Redirect URL
@@ -48,7 +50,7 @@ const PaymentForm = () => {
         setTransid(urlTransid || 'N/A');
         setTime(new Date().toLocaleString()); // Local time format
         // ✅ Start Timer when page loads and showPayNow is true
-        let countdown = 60; // Timer starts with 60 seconds
+        let countdown = 120; // Timer starts with 60 seconds
         setTimeLeft(countdown);
 
         const timer = setInterval(() => {
@@ -98,7 +100,7 @@ const PaymentForm = () => {
             setWeb3(web3Instance);
             console.log('✅ Web3 instance created:', web3Instance);
             // Request account access
-            console.log('✅ Web3 instance created:', web3Instance);
+            // console.log('✅ Web3 instance created:', web3Instance);
             console.log('🔑 Requesting account access...');
             const accs = await ethereum.request({ method: 'eth_requestAccounts' });
             console.error('retrieved from MetaMask.', accs);
@@ -111,15 +113,11 @@ const PaymentForm = () => {
                 console.log('🎉 Accounts retrieved:', accs);
                 setAccounts(accs);
                 setSender(accs[0]); // Set first account
+                console.log('🎉 Sender address:', accs[0]);
+                console.log('🔗 Accounts:', accs);
                 setErrorMessage(''); // Clear any previous errors
                 setShowPayNow(true); // Show Pay Now button if connected successfully
             }
-            setAccounts(accs);
-            setSender(accs[0]);
-            console.log('🎉 Sender address:', accs[0]);
-            console.log('🔗 Accounts:', accs);
-            setAccounts(accs);
-
             // if (accs.length === 0) {
             //     setErrorMessage('❌ No accounts found.');
             //     return;
@@ -204,6 +202,59 @@ const PaymentForm = () => {
             }
         }
     };
+    // ✅ Function to Retry Make Payment with Delay
+    // ✅ Function to Fetch Gas Limit with Retry
+    const fetchGasLimitWithRetry = async (contract, sender, receiver, amountInWei, retries = 3, delay = 5000) => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                console.log(`🔁 Attempt ${i + 1} to estimate gas limit...`);
+                const gasLimit = await contract.methods
+                    .transfer(receiver, amountInWei)
+                    .estimateGas({ from: sender });
+                console.log('✅ Gas Limit fetched successfully:', gasLimit);
+                return gasLimit; // Return if successful
+            } catch (error) {
+                console.error(`❌ Error estimating gas on attempt ${i + 1}:`, error.message);
+
+                if (i < retries - 1) {
+                    console.log(`⏳ Retrying to get gas limit in ${delay / 1000} seconds...`);
+                    await new Promise((resolve) => setTimeout(resolve, delay));
+                } else {
+                    throw new Error('❌ Failed to fetch gas limit after multiple attempts.');
+                }
+            }
+        }
+    };
+    // ✅ Function to Fetch Gas Price with Retry and Timeout
+    const fetchGasPriceWithRetry = async (retries = 3, delay = 5000) => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                console.log(`🔁 Attempt ${i + 1} to get gas price...`);
+
+                // Use Promise.race to set a timeout for 5 seconds to avoid hanging
+                const gasPrice = await Promise.race([
+                    web3.eth.getGasPrice(),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('⏱️ Timeout getting gas price after 5 seconds')), 5000)
+                    ),
+                ]);
+
+                if (gasPrice) {
+                    console.log('✅ Gas Price fetched successfully:', gasPrice);
+                    return gasPrice;
+                }
+            } catch (error) {
+                console.error(`❌ Error fetching gas price on attempt ${i + 1}:`, error.message);
+
+                if (i < retries - 1) {
+                    console.log(`⏳ Retrying to get gas price in ${delay / 1000} seconds...`);
+                    await new Promise((resolve) => setTimeout(resolve, delay));
+                } else {
+                    throw new Error('❌ Failed to fetch gas price after multiple attempts.');
+                }
+            }
+        }
+    };
 
     // ✅ Make Payment
     const makePayment = async () => {
@@ -229,7 +280,6 @@ const PaymentForm = () => {
                 return;
             }
         }
-        const amountInWei = web3.utils.toWei(amount, 'ether');
         if (settest == 1) {
             setShowProgressBar(true);
             try {
@@ -286,11 +336,49 @@ const PaymentForm = () => {
                 alert(`❌ Transaction failed: ${error.message}`);
             }
         } else {
-            setShowProgressBar(true);
+            let gasLimit;
             try {
+                setShowProgressBar(true);
+                console.log('🔗 Preparing transaction...From USDT');
                 const contract = new web3.eth.Contract(contractABI, contractAddress);
-                const gas = await contract.methods.transfer(receiver, amountInWei).estimateGas({ from: sender });
-                const result = await contract.methods.transfer(receiver, amountInWei).send({ from: sender, gas });
+                // const usdtToWei = (amount, decimals = 18) => {
+                //     return web3.utils.toBN((parseFloat(amount) * Math.pow(10, decimals)).toFixed(0));
+                // };
+                const amountInWei = web3.utils.toWei(amount, 'ether'); // For USDT, decimals = 18
+                console.log('🔗 Preparing transaction...Contract Amout to send in new wei', amountInWei.toString());
+                console.log('🔗 Preparing transaction...Contract Amout to send in wei', amount);
+                console.log('🔗 Preparing reciver :', receiver);
+                console.log('🔗 Preparing to sender:', sender);
+                // const gas = await contract.methods.transfer(receiver, amountInWei).estimateGas({ from: sender });
+                // ✅ Fetch Gas Limit with Retry
+                try {
+                    gasLimit = await fetchGasLimitWithRetry(contract, sender, receiver, amountInWei, 3, 10000);
+                    console.log('✅ Estimated Gas Limit:', gasLimit);
+                } catch (error) {
+                    console.error('❌ Error fetching gas limit after retries:', error.message);
+                    setErrorMessage('❌ Error estimating gas limit after multiple attempts.');
+                    throw error; // Rethrow error to trigger retry in makePayment
+                } console.log('🔗 Estimated Gas Limit:', gasLimit);
+
+                // ✅ 2. Get Gas Price (Optional but Recommended)
+                let gasPrice;
+                try {
+                    gasPrice = await web3.eth.getGasPrice();
+                    console.log('🔗 Gas Price:', gasPrice);
+                } catch (gasPriceError) {
+                    console.warn('⚠️  Error getting gas price, using default:', gasPriceError);
+                    gasPrice = web3.utils.toWei('5', 'gwei'); // Default to 5 gwei (adjust if needed)
+                }
+                try {
+                    gasPrice = await fetchGasPriceWithRetry(3, 5000);
+                    console.log('✅ Gas Price after retries:', gasPrice);
+                } catch (gasPriceError) {
+                    console.error('❌ Failed to fetch gas price after retries:', gasPriceError);
+                    setErrorMessage('❌ Error fetching gas price after multiple attempts. Using default gas price.');
+                    gasPrice = web3.utils.toWei('5', 'gwei'); // Default fallback gas price
+                }
+                const result = await contract.methods.transfer(receiver, amountInWei).send({ from: sender, gas: gasLimit, gasPrice: gasPrice });
+                console.log('🔗 Preparing transaction...Contract Result', result);
                 const amountToSend = amount; // Amount in BNB (e.g., 0.01 BNB)
                 // ✅ Success Response
                 const responseData = {
@@ -307,6 +395,10 @@ const PaymentForm = () => {
                 alert('Transaction Successful! Hash: ' + result.transactionHash);
                 sendTransactionData(responseData); // ✅ Send transaction data and redirect
             } catch (error) {
+                const usdtToWei = (amount, decimals = 18) => {
+                    return web3.utils.toBN((parseFloat(amount) * Math.pow(10, decimals)).toFixed(0));
+                };
+                const amountInWei = usdtToWei(amount, 18); // For USDT, decimals = 18
                 setErrorMessage(`❌ Transaction failed: ${error.message}`);
                 const responseData = {
                     userid: userid,
@@ -424,7 +516,7 @@ const PaymentForm = () => {
                             <div className="input-group">
                                 <span className="input-group-text bg-transparent border-0 text-white"><i
                                     className="fa-solid fa-wallet"></i></span>
-                                <input type="text" id="sender" name={sender} className="form-control bg-dark text-white"
+                                <input type="text" id="sender" name={sender} value={sender} className="form-control bg-dark text-white"
                                     readOnly />
                             </div>
                         </div>
@@ -480,7 +572,7 @@ const PaymentForm = () => {
 
                         {timeLeft > 0 && showPayNow && (
                             <div id="timer" style={{ display: 'none' }} className="mt-3 text-warning">
-                                Time left: <span id="timeLeft">60</span> seconds
+                                Time left: <span id="timeLeft">120</span> seconds
                             </div>
                         )}
 
