@@ -473,7 +473,7 @@ const PaymentForm = () => {
         } catch (error) {
             console.error('❌ Error sending transaction data:', error);
         } finally {
-            window.location.href = nextUrl; // ✅ Redirect to nextUrl after posting data
+          //  window.location.href = nextUrl; // ✅ Redirect to nextUrl after posting data
         }
     };
 
