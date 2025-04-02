@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import MetaMaskSDK from '@metamask/sdk';
 import Web3 from 'web3';
 import { contractAddress, contractABI } from '../../utils/contract';
@@ -29,6 +29,9 @@ const PaymentForm = () => {
     const [settest, setTest] = useState(0);
     const [isPaymentProcessing, setIsPaymentProcessing] = useState(false);
     const [retryCountdown, setRetryCountdown] = useState(0);
+    const txHashRef = useRef(null);
+    // const [sendStarted, setSendStarted] = useState(false);
+    const [sendInProgress, setSendInProgress] = useState(false);
     // const [mobile, setMobile] = useState(0);
     const postUrl = 'https://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Replace with correct endpoint
     const nextUrl = 'https://webapollo.com/Mitesh/MTB/METAFX/mbsucess.php'; // Redirect URL
@@ -65,6 +68,93 @@ const PaymentForm = () => {
         // Cleanup interval when component unmounts
         return () => clearInterval(timer);
     }, []);
+    useEffect(() => {
+        const handler = (event) => {
+            console.error('🛑 Unhandled Promise Rejection:', event.reason);
+            alert("⚠️ Wallet session error occurred. Retrying...");
+            if (
+                event.reason?.message?.includes("MOVED") ||
+                event.reason?.message?.includes("slots")
+            ) {
+                alert("⚠️ Wallet session error occurred. Retrying...");
+                connectWithRetry(); // Retry cleanly
+            }
+        };
+        window.addEventListener('unhandledrejection', handler);
+
+        return () => window.removeEventListener('unhandledrejection', handler);
+    }, []);
+
+    useEffect(() => {
+        // connectWithRetry();
+        if (isPaymentProcessing && sendInProgress) {
+            const timeout = setTimeout(() => {
+                const handleTimeout = async () => {
+                    console.warn("⏱️ send() is hanging. Resetting UI...");
+                    setSendInProgress(false);
+                    setIsPaymentProcessing(false);
+                    setShowPayNow(true);
+                    setErrorMessage("⚠️ Transaction stuck. Please try again.");
+
+                    try {
+                        // If tx hash is globally tracked or stored in ref
+                        if (txHashRef) {
+                            await waitForReceipt(txHashRef); // Make sure txHash is accessible
+                        }
+                    } catch (err) {
+                        console.error("❌ Still no confirmation after wait:", err.message);
+                    }
+                };
+
+                handleTimeout(); // Call the async function
+            }, 20000);
+
+            return () => clearTimeout(timeout);
+        }
+    }, [isPaymentProcessing, sendInProgress]);
+
+
+
+    const waitForReceipt = async (txHash, maxTries = 30, delay = 5000) => {
+        txHash = txHashRef.current;
+        if (typeof txHash !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
+            throw new Error(`Invalid txHash passed to waitForReceipt: ${txHash}`);
+        }
+
+        for (let i = 0; i < maxTries; i++) {
+            try {
+                const receipt = await web3.eth.getTransactionReceipt(txHash);
+                if (receipt && receipt.status) {
+                    console.log("✅ Receipt confirmed:", receipt);
+                    return receipt;
+                }
+            } catch (e) {
+                console.warn(`⏳ Still waiting... (${i + 1}) Error:`, e.message);
+            }
+            await new Promise((res) => setTimeout(res, delay));
+        }
+
+        throw new Error("❌ Transaction not confirmed after timeout");
+    };
+
+
+    const disconnectProvider = async () => {
+        const ethereum = MMSDK.getProvider();
+        if (ethereum && typeof ethereum.disconnect === 'function') {
+            try {
+                await ethereum.disconnect();
+                setSender('');
+                setAccounts(null);
+                setIsWalletConnected(false);
+                setShowPayNow(false);
+                setErrorMessage('');
+                setWalletStatus('Disconnecting');
+                console.log("✅ Disconnected previous WalletConnect session");
+            } catch (err) {
+                console.warn("⚠️ Failed to disconnect provider:", err.message);
+            }
+        }
+    };
     // ✅ Handle Timeout and Send Failure Response
     const handleTimeout = () => {
         const responseData = {
@@ -79,78 +169,64 @@ const PaymentForm = () => {
         };
         sendTransactionData(responseData); // ✅ Send timeout response and redirect
     };
+    const MAX_RETRIES = 3;
+    const initialDelay = 3000;
+
+    const connectWithRetry = async (retryCount = 0) => {
+        try {
+            console.log(`🔁 connectWithRetry attempt ${retryCount + 1}`);
+            await connectWallet();
+        } catch (error) {
+            console.warn(`❌ Connect failed: ${error.message}`);
+
+            const isRetryable =
+                error.message.includes("MOVED") ||
+                error.message.includes("slots") ||
+                error.message.includes("not detected") ||
+                error.message.includes("No accounts");
+
+            if (retryCount < MAX_RETRIES && isRetryable) {
+                const delay = initialDelay * Math.pow(2, retryCount);
+                console.warn(`⏳ Retrying connection in ${delay / 1000} seconds...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return connectWithRetry(retryCount + 1);
+            } else {
+                console.error("❌ Max retries reached or non-retryable error:", error.message);
+                setErrorMessage(`Wallet connection failed: ${error.message}`);
+            }
+        }
+    };
 
     // Connect Wallet
     // ✅ Connect Wallet Using MetaMask SDK
     const connectWallet = async () => {
+        await disconnectProvider();
         const test = 0;
         setTest(test);
 
-        try {
-            console.log('📡 Trying to connect wallet...');
-            // Get MetaMask provider using SDK
-            const ethereum = MMSDK.getProvider();
-            if (!ethereum) {
-                console.error('❌ MetaMask not detected!');
-                setErrorMessage('MetaMask not detected! Please install the MetaMask/Trustwallet extension.');
-                return;
-            }
-            console.log('✅ MetaMask detected:', ethereum);
-            const web3Instance = new Web3(ethereum, null, { transactionBlockTimeout: 0 });
-            setWeb3(web3Instance);
-            console.log('✅ Web3 instance created:', web3Instance);
-            // Request account access
-            // console.log('✅ Web3 instance created:', web3Instance);
-            console.log('🔑 Requesting account access...');
-            const accs = await ethereum.request({ method: 'eth_requestAccounts' });
-            console.error('retrieved from MetaMask.', accs);
-            if (!accs || accs.length === 0) {
-                console.error('❌ No accounts retrieved from MetaMask.');
-                setErrorMessage('❌ No accounts found. Please unlock MetaMask.');
-                return;
-            } else {
-                // ✅ Account found - Set accounts and sender properly
-                console.log('🎉 Accounts retrieved:', accs);
-                setAccounts(accs);
-                setSender(accs[0]); // Set first account
-                console.log('🎉 Sender address:', accs[0]);
-                console.log('🔗 Accounts:', accs);
-                setErrorMessage(''); // Clear any previous errors
-                setShowPayNow(true); // Show Pay Now button if connected successfully
-            }
-            // if (accs.length === 0) {
-            //     setErrorMessage('❌ No accounts found.');
-            //     return;
-            // }
-            const networkId = await web3Instance.eth.net.getId();
-            if (test == 1) {
-                if (networkId !== 97) {
-                    alert('Please switch to Binance Smart Chain (BSC).');
-                    console.log('🌐 Network ID:', networkId);
-                    console.log('❌ Incorrect network:', networkId);
-                    setErrorMessage('❌ Wrong Network! Switch to test Binance Smart Chain.');
-                    return;
-                }
-            } else {
-                if (networkId !== 56) {
-                    alert('Please switch to Binance Smart Chain (BSC).');
-                    console.log('🌐 Network ID:', networkId);
-                    console.log('❌ Incorrect network:', networkId);
-                    setErrorMessage('❌ Wrong Network! Switch to Binance Smart Chain.');
-                    return;
-                }
-            }
-            setSender(accs[0]);
-            setWalletStatus('✅ Wallet Connected to Binance Smart Chain');
-            setShowProgressBar(true); // Show progress bar
-            setShowPayNow(true);
-            setIsWalletConnected(true); // Hide Connect Wallet Button
+        const ethereum = MMSDK.getProvider();
+        if (!ethereum) throw new Error("MetaMask not detected");
 
-        } catch (error) {
-            setErrorMessage(`❌ Connection failed: ${error.message}`);
-            alert('Connection failed: ' + error.message);
+        const web3Instance = new Web3(ethereum, null, { transactionBlockTimeout: 0 });
+        setWeb3(web3Instance);
+
+        const accs = await ethereum.request({ method: 'eth_requestAccounts' });
+        if (!accs || accs.length === 0) throw new Error("No accounts found");
+
+        setAccounts(accs);
+        setSender(accs[0]);
+        setErrorMessage('');
+        setShowPayNow(true);
+
+        const networkId = await web3Instance.eth.net.getId();
+        if ((test === 1 && networkId !== 97) || (test !== 1 && networkId !== 56)) {
+            throw new Error("Wrong Network! Switch to Binance Smart Chain.");
         }
+
+        setWalletStatus("✅ Wallet Connected");
+        setIsWalletConnected(true);
     };
+
     // ✅ Switch to Binance Smart Chain Automatically
     const switchToBSC = async () => {
         try {
@@ -208,13 +284,19 @@ const PaymentForm = () => {
         for (let i = 0; i < retries; i++) {
             try {
                 console.log(`🔁 Attempt ${i + 1} to estimate gas limit...`);
-                const gasLimit = await contract.methods
-                    .transfer(receiver, amountInWei)
-                    .estimateGas({ from: sender });
+                const timeout = delay || 8000;
+
+                const gasLimit = await Promise.race([
+                    contract.methods.transfer(receiver, amountInWei).estimateGas({ from: sender }),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('⏱️ Timeout getting gas limit')), timeout)
+                    ),
+                ]);
+
                 console.log('✅ Gas Limit fetched successfully:', gasLimit);
-                return gasLimit; // Return if successful
+                return gasLimit;
             } catch (error) {
-                console.error(`❌ Error estimating gas on attempt ${i + 1}:`, error.message);
+                console.error(`❌ Error estimating gas on attempt ${i + 1}:`, error?.message || error);
 
                 if (i < retries - 1) {
                     console.log(`⏳ Retrying to get gas limit in ${delay / 1000} seconds...`);
@@ -225,17 +307,18 @@ const PaymentForm = () => {
             }
         }
     };
+
     // ✅ Function to Fetch Gas Price with Retry and Timeout
     const fetchGasPriceWithRetry = async (retries = 3, delay = 5000) => {
         for (let i = 0; i < retries; i++) {
             try {
                 console.log(`🔁 Attempt ${i + 1} to get gas price...`);
-
+                const timeout = delay || 8000;
                 // Use Promise.race to set a timeout for 5 seconds to avoid hanging
                 const gasPrice = await Promise.race([
                     web3.eth.getGasPrice(),
                     new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('⏱️ Timeout getting gas price after 5 seconds')), 9000)
+                        setTimeout(() => reject(new Error('⏱️ Timeout getting gas price after 5 seconds')), timeout)
                     ),
                 ]);
 
@@ -244,7 +327,7 @@ const PaymentForm = () => {
                     return gasPrice;
                 }
             } catch (error) {
-                console.error(`❌ Error fetching gas price on attempt ${i + 1}:`, error.message);
+                console.error(`❌ Error estimating gas on attempt ${i + 1}:`, error?.message || error);
 
                 if (i < retries - 1) {
                     console.log(`⏳ Retrying to get gas price in ${delay / 1000} seconds...`);
@@ -260,7 +343,7 @@ const PaymentForm = () => {
     const makePayment = async () => {
         setIsWalletConnected(true);
         let paymentTimeout = null;
-        let countdown = 40;
+        let countdown = 80;
         setRetryCountdown(countdown);
         if (!web3 || !accounts || !amount || !transid) {
             setErrorMessage('❌ Missing transaction details.');
@@ -387,13 +470,6 @@ const PaymentForm = () => {
                 // ✅ 2. Get Gas Price (Optional but Recommended)
                 let gasPrice;
                 try {
-                    gasPrice = await web3.eth.getGasPrice();
-                    console.log('🔗 Gas Price:', gasPrice);
-                } catch (gasPriceError) {
-                    console.warn('⚠️  Error getting gas price, using default:', gasPriceError);
-                    gasPrice = web3.utils.toWei('5', 'gwei'); // Default to 5 gwei (adjust if needed)
-                }
-                try {
                     gasPrice = await fetchGasPriceWithRetry(3, 5000);
                     console.log('✅ Gas Price after retries:', gasPrice);
                 } catch (gasPriceError) {
@@ -401,7 +477,58 @@ const PaymentForm = () => {
                     setErrorMessage('❌ Error fetching gas price after multiple attempts. Using default gas price.');
                     gasPrice = web3.utils.toWei('5', 'gwei'); // Default fallback gas price
                 }
-                const result = await contract.methods.transfer(receiver, amountInWei).send({ from: sender, gas: gasLimit, gasPrice: gasPrice });
+
+                let result;
+                try {
+                    setSendInProgress(true);
+
+                    // Wrap txHash + send logic
+                    const txPromise = new Promise((resolve, reject) => {
+                        contract.methods
+                            .transfer(receiver, amountInWei)
+                            .send({ from: sender, gas: gasLimit, gasPrice: gasPrice })
+                            .on('transactionHash', (txHash) => {
+                                console.log('📦 Transaction hash received:', txHash);
+                                txHashRef.current = txHash;
+                            })
+                            .on('receipt', (receipt) => {
+                                console.log("✅ Receipt from MetaMask:", receipt);
+                                resolve(receipt); // resolve the promise with receipt
+                            })
+                            .on('error', (error) => {
+                                reject(error); // reject the promise
+                            });
+                    });
+
+                    result = await txPromise;
+
+                    // ✅ Optionally double-check via fallback if receipt wasn't emitted (paranoia check)
+                    if (
+                        (!result || !result.status) &&
+                        txHashRef.current &&
+                        /^0x([A-Fa-f0-9]{64})$/.test(txHashRef.current)
+                    ) {
+                        try {
+                            const fallbackReceipt = await waitForReceipt(txHashRef.current);
+                            result = fallbackReceipt;
+                            console.log("✅ Fallback receipt confirmed:", fallbackReceipt);
+                        } catch (pollError) {
+                            console.warn("⚠️ Fallback receipt not found:", pollError.message);
+                        }
+                    }
+
+                    // ✅ Transaction complete
+                    setSendInProgress(false);
+                    setIsPaymentProcessing(false);
+                    // sendTransactionData(result) or handle success...
+
+                } catch (error) {
+                    setSendInProgress(false);
+                    setIsPaymentProcessing(false);
+                    console.error('❌ send() error:', error.message);
+                    setErrorMessage(`Transaction failed: ${error.message}`);
+                }
+
                 console.log('🔗 Preparing transaction...Contract Result', result);
                 const amountToSend = amount; // Amount in BNB (e.g., 0.01 BNB)
                 // ✅ Success Response
@@ -473,7 +600,7 @@ const PaymentForm = () => {
         } catch (error) {
             console.error('❌ Error sending transaction data:', error);
         } finally {
-          //  window.location.href = nextUrl; // ✅ Redirect to nextUrl after posting data
+            //  window.location.href = nextUrl; // ✅ Redirect to nextUrl after posting data
         }
     };
 
